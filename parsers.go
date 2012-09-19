@@ -20,5 +20,5 @@ func ParseLineMetric(line string) (*Metric, error) {
 		return nil, fmt.Errorf("Cannot parse metric, invalid timestamp '%v'", parts[2])
 	}
 
-	return &Metric{parts[0], value, int(timestamp)}, nil
+	return &Metric{parts[0], DataPoint{value, int(timestamp)}}, nil
 }
