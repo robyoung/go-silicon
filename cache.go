@@ -5,11 +5,11 @@ package silicon
 
 */
 type MetricCache interface {
-	Store(*Metric)          // non-blocking, eventually delivered
-	Size() int              // the total number of data points on all keys
-	Pop(string) []DataPoint // remove and return all data points for a given key
-	Counts() map[string]int // return a map of keys and their counts
-	Close() map[string] []DataPoint// close down this metric cache
+	Store(*Metric)                 // non-blocking, eventually delivered
+	Size() int                     // the total number of data points on all keys
+	Pop(string) []DataPoint        // remove and return all data points for a given key
+	Counts() map[string]int        // return a map of keys and their counts
+	Close() map[string][]DataPoint // close down this metric cache
 }
 
 /*
@@ -44,7 +44,7 @@ const (
 	size
 	pop
 	counts
-  end
+	end
 )
 
 func (cache *metricCache) Store(metric *Metric) {
@@ -67,12 +67,12 @@ func (cache *metricCache) Counts() map[string]int {
 	return (<-result).(map[string]int)
 }
 
-func (cache *metricCache) Close() (data map[string] []DataPoint) {
-  result := make(chan interface{})
-  cache.commands <- commandData{action: end, result: result}
-  <-result
+func (cache *metricCache) Close() (data map[string][]DataPoint) {
+	result := make(chan interface{})
+	cache.commands <- commandData{action: end, result: result}
+	<-result
 	close(cache.commands)
-  return cache.data
+	return cache.data
 }
 
 func (cache *metricCache) run() {
@@ -95,9 +95,9 @@ func (cache *metricCache) run() {
 				result[key] = len(datapoints)
 			}
 			command.result <- result
-    case end:
-      command.result <- true
-      return
+		case end:
+			command.result <- true
+			return
 		}
 	}
 }
