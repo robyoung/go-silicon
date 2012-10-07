@@ -1,12 +1,12 @@
 package silicon
 
 import (
+	"fmt"
 	"github.com/robyoung/go-whisper"
+	"math/rand"
 	"os"
 	"testing"
 	"time"
-	// "reflect"
-	"fmt"
 )
 
 type dummyResolver struct {
@@ -61,11 +61,11 @@ func assertFetchedResults(t *testing.T, result *whisper.TimeSeries, count, value
 	}
 }
 
-func TestCreatingSyncWriter(t *testing.T) {
+func TestWriter(t *testing.T) {
 	path, fullPath, resolver := setUpAndCheck(t)
 	defer tearDown(path)
 
-	writer := NewSyncWriter(path, resolver)
+	writer := NewWriter(path, resolver)
 
 	now := int(time.Now().Unix())
 	writer.Send("foo.bar", makeGoodPoints(10, 1))
@@ -79,75 +79,21 @@ func TestCreatingSyncWriter(t *testing.T) {
 	result, err := file.Fetch(now-10, now)
 
 	assertFetchedResults(t, result, 10, 100)
-}
-
-func TestCreatingAsyncWriter(t *testing.T) {
-	path, fullPath, resolver := setUpAndCheck(t)
-	defer tearDown(path)
-
-	writer := NewAsyncWriter(path, resolver)
-
-	now := int(time.Now().Unix())
-	writer.Send("foo.bar", makeGoodPoints(10, 1))
-
-	file, err := whisper.Open(fullPath)
-	if err == nil {
-		t.Fatalf("Error file should not exist yet: %v", err)
-	}
-
-	writer.Close()
-
-	file, err = whisper.Open(fullPath)
-	if err != nil {
-		t.Fatalf("Error opening whisper file: %v", err)
-	}
-
-	result, err := file.Fetch(now-10, now)
-
-	assertFetchedResults(t, result, 10, 100)
-}
-
-func TestParallelSyncWriter(t *testing.T) {
-	path, fullPath, resolver := setUpAndCheck(t)
-	defer tearDown(path)
-
-	writer := NewParallelSyncWriter(path, resolver)
-
-	now := int(time.Now().Unix())
-	writer.Send("foo.bar", makeGoodPoints(10, 1))
-	writer.Close()
-
-	file, err := whisper.Open(fullPath)
-	if err != nil {
-		t.Fatalf("Error opening whisper file: %v", err)
-	}
-
-	result, err := file.Fetch(now-10, now)
-
-	assertFetchedResults(t, result, 10, 100)
-}
-
-func Test_getFullPath(t *testing.T) {
-	if path := getFullPath("/tmp", "foo.bar"); "/tmp/foo/bar.wsp" != path {
-		t.Fatalf("Unexpected path: /tmp/foo/bar.wsp != %v", path)
-	}
-	if path := getFullPath("/tmp/", "foo.bar"); "/tmp/foo/bar.wsp" != path {
-		t.Fatalf("Unexpected path: /tmp/foo/bar.wsp != %v", path)
-	}
 }
 
 func benchmarkWriter(b *testing.B, makeWriter func(string, StorageResolver) Writer) {
 	path, _, resolver := setUp()
+	rand.Seed(12345)
 	for i := 0; i < b.N; i++ {
 		writer := makeWriter(path, resolver)
 		done := make(chan bool)
-		routines, times, keys := 10, 100, 100
+		routines, times, keys := 10, 100, 10000
 		for i := 0; i < routines; i++ {
 			go func() {
 				for j := 0; j < times; j++ {
-					for k := 0; k < keys; k++ {
-						writer.Send(fmt.Sprintf("foo.bar%v", k), makeGoodPoints(10, 1))
-					}
+					writer.Send(
+						fmt.Sprintf("foo.bar%v", rand.Intn(keys)),
+						makeGoodPoints(10, 1))
 				}
 				done <- true
 			}()
@@ -160,20 +106,8 @@ func benchmarkWriter(b *testing.B, makeWriter func(string, StorageResolver) Writ
 	}
 }
 
-func BenchmarkWriterSync(b *testing.B) {
+func BenchmarkWriter(b *testing.B) {
 	benchmarkWriter(b, func(path string, resolver StorageResolver) Writer {
-		return NewSyncWriter(path, resolver)
-	})
-}
-
-func BenchmarkWriterAsync(b *testing.B) {
-	benchmarkWriter(b, func(path string, resolver StorageResolver) Writer {
-		return NewAsyncWriter(path, resolver)
-	})
-}
-
-func BenchmarkWriterPSync(b *testing.B) {
-	benchmarkWriter(b, func(path string, resolver StorageResolver) Writer {
-		return NewParallelSyncWriter(path, resolver)
+		return NewWriter(path, resolver)
 	})
 }

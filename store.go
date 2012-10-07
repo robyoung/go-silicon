@@ -1,212 +1,132 @@
+/*
+	Package implements a storage writer to manage sending data points to the data store.
+*/
 package silicon
 
 import (
-	"github.com/robyoung/go-whisper"
 	"github.com/robyoung/go-cache"
+	"github.com/robyoung/go-whisper"
 	"os"
 	"path"
 	"strings"
 )
 
+/*
+	Interface for writing data points to a backend store.
+*/
 type Writer interface {
+	/*
+		Send the slice of DataPoints to the data store against the given key.
+	*/
 	Send(string, []DataPoint)
+
+	/*
+		Close the writer and wait for all writes to complete.
+	*/
 	Close()
 }
 
+/*
+	Retrieve Whisper configuration details for a given key.
+*/
 type StorageResolver interface {
 	Find(string) (whisper.Retentions, whisper.AggregationMethod, float32)
+}
+
+type writer struct {
+	basePath string
+	resolver StorageResolver
+	in       chan *storageMessage
+	done     chan bool
 }
 
 type storageMessage struct {
 	key    string
 	points []DataPoint
-	result chan bool
 }
 
-type syncWriter struct {
-	basePath string
-	resolver StorageResolver
-	in       chan *storageMessage
-	done     chan bool
-}
-
-func NewSyncWriter(basePath string, resolver StorageResolver) *syncWriter {
-	writer := new(syncWriter)
-	writer.basePath = basePath
-	writer.resolver = resolver
-	writer.in = make(chan *storageMessage)
-	writer.done = make(chan bool)
-
-	go writer.run()
-
-	return writer
-}
-
-func (writer *syncWriter) Send(key string, points []DataPoint) {
-	out := make(chan bool)
-	writer.in <- &storageMessage{key, points, out}
-	<-out
-}
-
-func (writer *syncWriter) Close() {
-	close(writer.in)
-	<-writer.done
-}
-
-func (writer *syncWriter) run() {
-	runSerial(writer.in, writer.done, writer.resolver, writer.basePath)
-}
-
-type asyncWriter struct {
-	basePath string
-	resolver StorageResolver
-	in       chan *storageMessage
-	done     chan bool
-}
-
-func NewAsyncWriter(basePath string, resolver StorageResolver) *asyncWriter {
-	writer := new(asyncWriter)
-	writer.basePath = basePath
-	writer.resolver = resolver
-	writer.in = make(chan *storageMessage)
-	writer.done = make(chan bool)
-
-	go writer.run()
-
-	return writer
-}
-
-func (writer *asyncWriter) Send(key string, points []DataPoint) {
-	writer.in <- &storageMessage{key, points, nil}
-}
-
-func (writer *asyncWriter) Close() {
-	close(writer.in)
-	<-writer.done
-}
-
-func (writer *asyncWriter) run() {
-	runSerial(writer.in, writer.done, writer.resolver, writer.basePath)
-}
-
-func runSerial(in <-chan *storageMessage, done chan<- bool, resolver StorageResolver, basePath string) {
-	for message := range in {
-		file, err := getWhisper(message.key, basePath, resolver)		
-		if err == nil {
-			timeSeries := toTimeSeries(message.points)
-
-			file.UpdateMany(timeSeries)
-
-			file.Close()
-		} else {
-			// TODO: log the error
-		}
-
-		if message.result != nil {
-			message.result <- true
-		}
-	}
-	done <- true
-}
-
-// TODO: remove duplication with composition
-type parallelSyncWriter struct {
-	basePath string
-	resolver StorageResolver
-	in       chan *storageMessage
-	done     chan bool
-}
-
-func NewParallelSyncWriter(basePath string, resolver StorageResolver) *parallelSyncWriter {
-	writer := new(parallelSyncWriter)
-	writer.basePath = basePath
-	writer.resolver = resolver
-	writer.in = make(chan *storageMessage)
-	writer.done = make(chan bool)
-
-	go writer.run()
-
-	return writer
-}
-
-func (writer *parallelSyncWriter) Send(key string, points []DataPoint) {
-	out := make(chan bool)
-	writer.in <- &storageMessage{key, points, out}
-	<-out
-}
-
-func (writer *parallelSyncWriter) Close() {
-	close(writer.in)
-	<-writer.done
-}
-
-func (writer *parallelSyncWriter) run() {
-	runParallel(writer.in, writer.done, writer.resolver, writer.basePath)
-}
-
-type whisperChannel struct {
-	// TODO: do we need the whisper reference here?
+/*
+	Stores metadata about an open whisper file.
+*/
+type writeMetadata struct {
 	whisper *whisper.Whisper
-	in chan *storageMessage
-	done chan bool
+	in      chan *storageMessage
+	done    chan bool
 }
 
-func createWhisperChannel()
+/*
+	Create a new writer that creates files under `basePath` and fetches
+	Whisper configuration details from resolver.
+*/
+func NewWriter(basePath string, resolver StorageResolver) *writer {
+	w := new(writer)
+	w.basePath = basePath
+	w.resolver = resolver
+	w.in = make(chan *storageMessage)
+	w.done = make(chan bool)
 
-func runParallel(in <-chan *storageMessage, done chan<- bool, resolver StorageResolver, basePath string) {
-	c := cache.NewLRUCache(50)
-	c.SetEvictionHook(func(key string, value interface{}) {
-		item := value.(*whisperChannel)
-		close(item.in)
-		<-item.done
-		item.whisper.Close()
-	})
-	for message := range in {
-		value, _ := c.Get(message.key)
-		var item *whisperChannel
+	go w.run()
+
+	return w
+}
+
+/*
+	Send a set of data points to the whisper file identified by the key.
+*/
+func (w *writer) Send(key string, points []DataPoint) {
+	w.in <- &storageMessage{key, points}
+}
+
+/*
+	Close the writer, wait for all messages to be written and files to be closed.
+*/
+func (w *writer) Close() {
+	close(w.in)
+	<-w.done
+}
+
+func (w *writer) run() {
+	cache := w.createCache()
+	for message := range w.in {
+		value, _ := cache.Get(message.key)
+		var metadata *writeMetadata
 		if value != nil {
-			item = value.(*whisperChannel)
+			metadata = value.(*writeMetadata)
 		} else {
-			// create a new
-			file, err := getWhisper(message.key, basePath, resolver)
+			// TODO: consider moving this inside runWriter
+			file, err := w.createWhisper(message.key)
 			if err != nil {
-				item = &whisperChannel{}
+				// TODO: log errors
+				metadata = &writeMetadata{}
 			} else {
-				item = &whisperChannel{file, make(chan *storageMessage), make(chan bool)}
+				metadata = &writeMetadata{file, make(chan *storageMessage), make(chan bool)}
 			}
-			c.Set(message.key, item)
-			go func(item *whisperChannel) {
-				for message := range item.in {
-					item.whisper.UpdateMany(toTimeSeries(message.points))
-					if message.result != nil {
-						message.result <- true
-					}
-				}
-				item.done<- true
-			}(item)
+			cache.Set(message.key, metadata)
+			go w.runWriter(metadata)
 		}
-		if item != nil {
-			item.in <- message
+		if metadata != nil {
+			metadata.in <- message
 		}
 	}
-	done<-true
+	// TODO: close all whipser files
+	w.done <- true
 }
 
-func getFullPath(basePath, key string) string {
-	return strings.TrimRight(basePath, "/") + "/" + strings.Replace(key, ".", "/", -1) + ".wsp"
+func (w *writer) createCache() *cache.LRUCache {
+	c := cache.NewLRUCache(50) // TODO: make cache size configurable
+	c.SetEvictionHook(func(key string, value interface{}) {
+		metadata := value.(*writeMetadata)
+		close(metadata.in)
+		<-metadata.done
+		metadata.whisper.Close()
+	})
+
+	return c
 }
 
-func toTimeSeries(points []DataPoint) []*whisper.TimeSeriesPoint {
-	result := make([]*whisper.TimeSeriesPoint, len(points))
-	for i, point := range points {
-		result[i] = &whisper.TimeSeriesPoint{point.timestamp, point.value}
-	}
-	return result
-}
-
-func getWhisper(key, basePath string, resolver StorageResolver) (*whisper.Whisper, error) {
-	retentions, aggregationMethod, xFilesFactor := resolver.Find(key)
-	fullPath := getFullPath(basePath, key)
+func (w *writer) createWhisper(key string) (*whisper.Whisper, error) {
+	retentions, aggregationMethod, xFilesFactor := w.resolver.Find(key)
+	fullPath := w.getFullPath(key)
 	os.MkdirAll(path.Dir(fullPath), os.ModeDir|os.ModePerm)
 
 	file, err := whisper.Create(fullPath, retentions, aggregationMethod, xFilesFactor)
@@ -215,5 +135,25 @@ func getWhisper(key, basePath string, resolver StorageResolver) (*whisper.Whispe
 			file, err = whisper.Open(fullPath)
 		}
 	}
+
 	return file, err
+}
+
+func (w *writer) getFullPath(key string) string {
+	return path.Join(w.basePath, strings.Replace(key, ".", "/", -1)+".wsp")
+}
+
+func (w *writer) runWriter(metadata *writeMetadata) {
+	for message := range metadata.in {
+		metadata.whisper.UpdateMany(toTimeSeries(message.points))
+	}
+	metadata.done <- true
+}
+
+func toTimeSeries(points []DataPoint) []*whisper.TimeSeriesPoint {
+	result := make([]*whisper.TimeSeriesPoint, len(points))
+	for i, point := range points {
+		result[i] = &whisper.TimeSeriesPoint{point.timestamp, point.value}
+	}
+	return result
 }
