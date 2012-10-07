@@ -9,6 +9,7 @@ import (
 	"os"
 	"path"
 	"strings"
+	"log"
 )
 
 /*
@@ -96,7 +97,7 @@ func (w *writer) run() {
 			// TODO: consider moving this inside runWriter
 			file, err := w.createWhisper(message.key)
 			if err != nil {
-				// TODO: log errors
+				log.Printf("Failed to create Whisper: %v", err)
 				metadata = &writeMetadata{}
 			} else {
 				metadata = &writeMetadata{file, make(chan *storageMessage), make(chan bool)}
@@ -108,7 +109,10 @@ func (w *writer) run() {
 			metadata.in <- message
 		}
 	}
-	// TODO: close all whipser files
+	for key := range cache.Keys() {
+		// manually delete to cause the evictions to run
+		cache.Delete(key)
+	}
 	w.done <- true
 }
 
