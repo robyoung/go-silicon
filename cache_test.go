@@ -13,10 +13,6 @@ func metric(key string) *Metric {
 func TestStore(t *testing.T) {
 	cache := NewMetricCache()
 	cache.Store(metric("foo.bar"))
-	if cache.Size() != 0 {
-		t.Fatalf("Expecting metric to take some time to be visible")
-	}
-	time.Sleep(15 * time.Microsecond)
 	if cache.Size() != 1 {
 		t.Fatalf("Expecting metric to eventually be visible")
 	}
@@ -72,7 +68,6 @@ func TestClose(t *testing.T) {
 	cache.Store(metric("foo.bar"))
 	cache.Store(metric("foo.baz"))
 	cache.Store(metric("foo.baz"))
-	time.Sleep(5 * time.Microsecond)
 
 	result := cache.Close()
 	if length := len(result); length != 2 {

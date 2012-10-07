@@ -12,10 +12,6 @@ type MetricCache interface {
 	Close() map[string][]DataPoint // close down this metric cache
 }
 
-/*
-  Only Store and Pop are within the critical section
-  Size and Counts are outside, occasionally causes 
-*/
 type metricCache struct {
 	data     map[string][]DataPoint
 	count    int
@@ -52,7 +48,9 @@ func (cache *metricCache) Store(metric *Metric) {
 }
 
 func (cache *metricCache) Size() int {
-	return cache.count
+	result := make(chan interface{})
+	cache.commands <- commandData{action: size, result: result}
+	return (<-result).(int)
 }
 
 func (cache *metricCache) Pop(key string) []DataPoint {
@@ -82,6 +80,8 @@ func (cache *metricCache) run() {
 			metric := (command.value).(*Metric)
 			cache.data[metric.key] = append(cache.data[metric.key], metric.DataPoint)
 			cache.count++
+		case size:
+			command.result <- cache.count
 		case pop:
 			result, found := cache.data[(command.value).(string)]
 			if found {
