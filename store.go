@@ -109,7 +109,7 @@ func (w *writer) run() {
 			metadata.in <- message
 		}
 	}
-	for key := range cache.Keys() {
+	for _, key := range cache.Keys() {
 		// manually delete to cause the evictions to run
 		cache.Delete(key)
 	}
