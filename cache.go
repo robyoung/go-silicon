@@ -68,8 +68,8 @@ func (cache *metricCache) Counts() map[string]int {
 func (cache *metricCache) Close() (data map[string][]DataPoint) {
 	result := make(chan interface{})
 	cache.commands <- commandData{action: end, result: result}
-	<-result
 	close(cache.commands)
+	<-result
 	return cache.data
 }
 

@@ -6,10 +6,10 @@ package silicon
 import (
 	"github.com/robyoung/go-cache"
 	"github.com/robyoung/go-whisper"
+	"log"
 	"os"
 	"path"
 	"strings"
-	"log"
 )
 
 /*
