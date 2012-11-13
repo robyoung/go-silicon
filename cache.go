@@ -1,5 +1,11 @@
 package silicon
 
+import (
+	"fmt"
+	"time"
+	"math"
+)
+
 /*
   A concurrent metric cache. It should be fast to store metrics and should not block.
 
@@ -98,6 +104,55 @@ func (cache *metricCache) run() {
 		case end:
 			command.result <- true
 			return
+		}
+	}
+}
+
+/*
+	A cache bolt allows you to attach a MetricCache to a CacheSink.
+	The bolt continuously polls the cache and pops metrics off in 
+	use order.
+*/
+type cacheBolt struct {
+	control chan bool
+	cache MetricCache
+	sink CacheSink
+}
+
+type CacheSink interface {
+	Send(string, []DataPoint)
+}
+
+func NewCacheBolt(cache MetricCache, sink CacheSink) *cacheBolt {
+	bolt := new(cacheBolt)
+	bolt.control = make(chan bool)
+	bolt.cache = cache
+	bolt.sink = sink
+
+	go bolt.run()
+
+	return bolt
+}
+
+/*
+	Is there a more idiomatic way of aproaching this? Some way
+	of letting the cache signal that it has more data.
+*/
+func (bolt *cacheBolt) run() {
+	backoff := 0.0
+	backoffLimit := 100000.0
+	for {
+		counts := bolt.cache.Counts()
+		if len(counts) == 0 {
+			backoff += 1
+			time.Sleep(time.Duration(math.Min(backoffLimit, math.Pow(backoff, 5))) * time.Millisecond)
+		} else {
+			fmt.Println(counts, len(counts), backoff)
+			// sort the counts
+			for key := range counts {
+				points := bolt.cache.Pop(key)
+				bolt.sink.Send(key, points)
+			}
 		}
 	}
 }
