@@ -59,7 +59,7 @@ func (resolver *fileStorageResolver) findRetentions(key string) (whisper.Retenti
 			if regexp.MustCompile(pattern).MatchString(key) {
 				retentionDef, err := resolver.schemas.String(section, "retentions")
 				if err != nil {
-					return nil, err
+					return nil, fmt.Errorf("Could not find retentions option for %v", section)
 				}
 				return whisper.ParseRetentionDefs(retentionDef)
 			}

@@ -4,6 +4,7 @@
 package silicon
 
 import (
+	"fmt"
 	"github.com/robyoung/go-cache"
 	"github.com/robyoung/go-whisper"
 	"log"
@@ -31,7 +32,7 @@ type Writer interface {
 	Retrieve Whisper configuration details for a given key.
 */
 type StorageResolver interface {
-	Find(string) (whisper.Retentions, whisper.AggregationMethod, float32)
+	Find(string) (whisper.Retentions, whisper.AggregationMethod, float32, error)
 }
 
 type writer struct {
@@ -129,7 +130,10 @@ func (w *writer) createCache() *cache.LRUCache {
 }
 
 func (w *writer) createWhisper(key string) (*whisper.Whisper, error) {
-	retentions, aggregationMethod, xFilesFactor := w.resolver.Find(key)
+	retentions, aggregationMethod, xFilesFactor, err := w.resolver.Find(key)
+	if err != nil {
+		return nil, fmt.Errorf("Resolver error: %v", err)
+	}
 	fullPath := w.getFullPath(key)
 	os.MkdirAll(path.Dir(fullPath), os.ModeDir|os.ModePerm)
 
@@ -140,7 +144,7 @@ func (w *writer) createWhisper(key string) (*whisper.Whisper, error) {
 		}
 	}
 
-	return file, err
+	return file, fmt.Errorf("Create error: %v", err)
 }
 
 func (w *writer) getFullPath(key string) string {

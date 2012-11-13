@@ -12,9 +12,9 @@ import (
 type dummyResolver struct {
 }
 
-func (r *dummyResolver) Find(key string) (whisper.Retentions, whisper.AggregationMethod, float32) {
+func (r *dummyResolver) Find(key string) (whisper.Retentions, whisper.AggregationMethod, float32, error) {
 	retentions, _ := whisper.ParseRetentionDefs("1s:5m,1m:30m")
-	return retentions, whisper.Sum, 0.5
+	return retentions, whisper.Sum, 0.5, nil
 }
 
 func makeGoodPoints(count, step int) []DataPoint {
