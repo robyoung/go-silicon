@@ -2,8 +2,8 @@ package silicon
 
 import (
 	"fmt"
-	"time"
 	"math"
+	"time"
 )
 
 /*
@@ -115,8 +115,8 @@ func (cache *metricCache) run() {
 */
 type cacheBolt struct {
 	control chan bool
-	cache MetricCache
-	sink CacheSink
+	cache   MetricCache
+	sink    CacheSink
 }
 
 type CacheSink interface {
